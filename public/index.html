@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>MigMaster Roll — Unlimited User ID</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080e1d;color:#eef2ff;font-family:Arial,sans-serif}
+main{max-width:900px;margin:auto;padding:12px}
+.card{background:#121a2d;border:1px solid #263454;border-radius:16px;padding:14px;margin-bottom:12px}
+.header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+h1{margin:0;font-size:25px}
+h2{font-size:17px;margin:0 0 12px}
+input,button{height:44px;border-radius:10px;border:1px solid #33446c;background:#0b1326;color:#fff;padding:0 12px;font-size:15px}
+input{width:100%;outline:none}
+input:focus{border-color:#5c79b9}
+button{cursor:pointer;font-weight:700}
+button:hover{filter:brightness(1.12)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.row{display:grid;grid-template-columns:38px 1fr 1fr;gap:8px;margin-bottom:8px;align-items:center}
+.num{color:#91a4cf;text-align:center}
+.actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.actions button{width:100%}
+.status{font-size:13px;color:#9fb0d5;margin-top:10px;min-height:18px}
+.small{font-size:12px;color:#8fa1c7;line-height:1.45}
+.list{max-height:300px;overflow:auto;border:1px solid #263454;border-radius:10px}
+.item{display:flex;justify-content:space-between;gap:8px;padding:9px 10px;border-bottom:1px solid #263454;font-size:13px}
+.item:last-child{border-bottom:0}
+.ready{color:#65e6a7}.error{color:#ff8290}.busy{color:#f5c451}
+.login-indicator{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:#9fb0d5;white-space:nowrap}
+.dot{width:9px;height:9px;border-radius:50%;background:#6b7280;display:inline-block}
+.dot.online{background:#65e6a7}.dot.busy{background:#f5c451}.dot.offline{background:#ff8290}
+.danger{border-color:#693544}
+.blue{border-color:#3a63b3;background:#10244a}
+.fileline{display:grid;grid-template-columns:1fr 120px;gap:8px;margin-bottom:8px}
+.roll{font-size:16px;width:100%;height:48px}
+.okbox{color:#65e6a7}
+.errbox{color:#ff8290}
+@media(max-width:600px){
+ main{padding:8px}
+ .card{padding:12px;border-radius:14px}
+ h1{font-size:22px}
+ .row{grid-template-columns:30px 1fr}
+ .row input:last-child{grid-column:2}
+ .actions{grid-template-columns:1fr 1fr}
+ .fileline{grid-template-columns:1fr}
+ .grid{grid-template-columns:1fr 1fr}
+ input,button{height:42px}
+}
+</style>
+</head>
+<body>
+<main>
+<section class="card">
+ <div class="header">
+  <div>
+   <h1>MigMaster Roll</h1>
+   <div class="small" style="margin-top:6px">1 perintah mengendalikan seluruh WebSocket yang sudah login.</div>
+  </div>
+  <div class="login-indicator"><span id="loginDot" class="dot offline"></span><span id="loginText">Offline</span></div>
+ </div>
+</section>
+
+<section class="card">
+ <h2>User ID <span id="accountCount" class="small"></span></h2>
+ <div id="accounts"></div>
+ <input id="fileInput" type="file" accept="application/json,.json" hidden>
+ <div class="fileline">
+   <input id="fileName" value="troop1" placeholder="Nama file">
+   <button id="add">TAMBAH ID</button>
+ </div>
+ <div class="actions">
+   <button id="save" class="blue">SAVE FILE</button>
+   <button id="load">LOAD FILE</button>
+   <button id="login" class="blue">LOGIN</button>
+   <button id="logout" class="danger">LOGOUT</button>
+ </div>
+ <div class="small" style="margin-top:8px">Jumlah User ID tidak dibatasi oleh aplikasi. SAVE menyimpan semua akun + room + delay LOGIN → ENTER.</div>
+ <div id="status" class="status"></div>
+</section>
+
+<section class="card">
+ <h2>Room</h2>
+ <div class="grid">
+  <input id="room" placeholder="Nama room">
+  <input id="delay" type="number" min="0" value="1000" placeholder="Delay LOGIN → ENTER (ms)">
+ </div>
+ <div class="actions" style="margin-top:8px">
+  <button id="enter" class="blue">ENTER ROOM</button>
+  <button id="leave">LEAVE ROOM</button>
+ </div>
+</section>
+
+<section class="card">
+ <h2>CommandBox</h2>
+ <button id="roll" class="roll blue">ROLL</button>
+ <div class="small" style="margin-top:8px">ROLL dijalankan berurutan: WebSocket 1 LOGIN → ENTER → LEAVE → LOGOUT, lalu WebSocket 2 sampai terakhir, kemudian kembali ke WebSocket 1. Tombol STOP menghentikan ROLL.</div>
+ <div id="rollstate" class="status"></div>
+</section>
+
+<section class="card">
+ <h2>WebSocket Array</h2>
+ <div id="wslist" class="list"></div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+let accounts=[];
+let rollRunning=false;
+
+function setLoginState(state,text){
+ $('loginDot').className='dot '+state;
+ $('loginText').textContent=text;
+}
+function renderInputs(){
+ $('accountCount').textContent=`(${accounts.length} akun)`;
+ const box=$('accounts'); box.innerHTML='';
+ accounts.forEach((a,i)=>{
+  const r=document.createElement('div'); r.className='row';
+  const n=document.createElement('div'); n.className='num'; n.textContent=i+1;
+  const u=document.createElement('input'); u.placeholder='Username'; u.value=a.username||'';
+  u.oninput=()=>accounts[i].username=u.value;
+  const p=document.createElement('input'); p.type='password'; p.placeholder='Password'; p.value=a.password||'';
+  p.oninput=()=>accounts[i].password=p.value;
+  r.append(n,u,p); box.appendChild(r);
+ });
+}
+function escapeHtml(s){
+ return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function renderStatus(list){
+ $('wslist').innerHTML=(list||[]).map((a,i)=>{
+  const cls=a.status==='ready'?'ready':(a.status==='connecting'||a.status==='authenticating'?'busy':'error');
+  const bal=a.balance?` · ${escapeHtml(a.balance)}`:'';
+  return `<div class="item"><span>WebSocket ${i+1} — ${escapeHtml(a.username)}${bal}</span><span class="${cls}">${escapeHtml(a.status||'')}</span></div>`;
+ }).join('')||'<div class="small" style="padding:10px">Belum ada WebSocket.</div>';
+}
+async function api(url,body){
+ const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+ const j=await r.json().catch(()=>({ok:false,error:'Respons server tidak valid'}));
+ if(!r.ok||j.ok===false) throw new Error(j.error||`HTTP ${r.status}`);
+ return j;
+}
+function saveFile(){
+ const name=($('fileName').value.trim()||'troop1').replace(/[\\/:*?"<>|]/g,'_');
+ const data={version:2,exportedAt:new Date().toISOString(),accounts,room:$('room').value.trim(),delay:Number($('delay').value)||0};
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement('a'); a.href=url; a.download=name.toLowerCase().endsWith('.json')?name:name+'.json';
+ document.body.appendChild(a); a.click(); a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+ $('status').textContent=`File berhasil dibuat: ${a.download} (${accounts.length} User ID).`;
+}
+function loadFile(file){
+ if(!file)return;
+ const reader=new FileReader();
+ reader.onload=()=>{
+  try{
+   const data=JSON.parse(reader.result);
+   const list=Array.isArray(data)?data:data.accounts;
+   if(!Array.isArray(list)) throw new Error('Format file tidak valid');
+   accounts=list.map(a=>({username:String(a?.username||''),password:String(a?.password||'')}));
+   if(data && !Array.isArray(data)){
+    $('room').value=String(data.room||'');
+    $('delay').value=Number.isFinite(Number(data.delay))?Number(data.delay):1000;
+   }
+   renderInputs();
+   $('status').textContent=`File berhasil diload: ${accounts.length} User ID.`;
+  }catch(e){$('status').textContent='Gagal membaca file: format JSON tidak valid.'}
+  finally{$('fileInput').value=''}
+ };
+ reader.onerror=()=>{$('status').textContent='File gagal dibaca.'};
+ reader.readAsText(file);
+}
+$('add').onclick=()=>{
+ accounts.push({username:'',password:''}); renderInputs();
+};
+$('save').onclick=saveFile;
+$('load').onclick=()=>$('fileInput').click();
+$('fileInput').onchange=e=>loadFile(e.target.files[0]);
+
+$('login').onclick=async()=>{
+ const valid=accounts.filter(a=>a.username.trim());
+ if(!valid.length){$('status').textContent='Tambahkan minimal satu User ID.';return}
+ $('login').disabled=true; setLoginState('busy','Auth...');
+ $('status').textContent=`Login ${valid.length} WebSocket secara bersamaan...`;
+ try{
+  const j=await api('/api/accounts',{accounts:valid});
+  renderStatus(j.accounts);
+  const ready=j.accounts.filter(a=>a.status==='ready').length;
+  setLoginState(ready?'online':'offline',ready?`${ready} online`:'Login gagal');
+  $('status').textContent=`${ready}/${j.count} WebSocket berhasil login.`;
+ }catch(e){
+  setLoginState('offline','Login gagal');
+  $('status').textContent='Login gagal: '+e.message;
+ }finally{$('login').disabled=false}
+};
+
+$('logout').onclick=async()=>{
+ $('logout').disabled=true;
+ try{
+  await api('/api/close'); renderStatus([]); setLoginState('offline','Offline');
+  $('status').textContent='Semua WebSocket ditutup.';
+ }catch(e){$('status').textContent='Logout gagal: '+e.message}
+ finally{$('logout').disabled=false}
+};
+
+async function roomAction(action){
+ const room=$('room').value.trim();
+ if(!room){$('status').textContent='Isi nama room.';return}
+ $('enter').disabled=true;$('leave').disabled=true;
+ try{
+  const j=await api('/api/room',{action,room});
+  $('status').textContent=`${action.toUpperCase()}: ${j.sent||0} WebSocket dikirim${j.failed?`, ${j.failed} gagal`:'.'}`;
+ }catch(e){$('status').textContent=`${action.toUpperCase()} gagal: ${e.message}`}
+ finally{$('enter').disabled=false;$('leave').disabled=false}
+}
+$('enter').onclick=()=>roomAction('join');
+$('leave').onclick=()=>roomAction('leave');
+
+async function refreshRoll(){
+ try{
+  const j=await fetch('/api/roll/status',{cache:'no-store'}).then(r=>r.json());
+  rollRunning=!!j.running;
+  $('roll').textContent=rollRunning?'STOP ROLL':'ROLL';
+  $('rollstate').textContent=j.message||'';
+  if(j.running) setTimeout(refreshRoll,700);
+ }catch{}
+}
+$('roll').onclick=async()=>{
+ const room=$('room').value.trim();
+ if(rollRunning){
+  try{await api('/api/roll/stop')}catch(e){}
+  await refreshRoll(); return;
+ }
+ if(!room){$('rollstate').textContent='Isi nama room terlebih dahulu.';return}
+ const delay=Math.max(0,Number($('delay').value)||0);
+ try{
+  const j=await api('/api/roll/start',{room,delay});
+  rollRunning=true; $('roll').textContent='STOP ROLL'; $('rollstate').textContent=j.message||'ROLL berjalan.';
+  refreshRoll();
+ }catch(e){$('rollstate').textContent='ROLL gagal: '+e.message}
+};
+setInterval(async()=>{
+ try{
+  const j=await fetch('/api/status',{cache:'no-store'}).then(r=>r.json());
+  renderStatus(j.accounts);
+ }catch{}
+},2000);
+
+accounts=[{username:'',password:''}];
+renderInputs(); renderStatus([]); setLoginState('offline','Offline'); refreshRoll();
+</script>
+</body>
+</html>
